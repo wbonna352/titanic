@@ -1,0 +1,161 @@
+---
+title: "Titanic"
+output:
+  github_document:
+    toc: TRUE
+    df_print: kable
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE,
+	dev = "svg",
+	out.width = "100%"
+)
+```
+
+
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(funModeling)
+library(flextable)
+
+set.seed(352)
+
+theme_set(theme_bw())
+theme_update(plot.title = element_text(hjust = 0.5),
+             plot.subtitle = element_text(hjust = 0.5))
+```
+
+
+```{r}
+train_df <- read_csv("raw_data/train.csv")
+test_df <- read_csv("raw_data/test.csv")
+```
+
+## ETL
+
+```{r}
+df_status(train_df, print_results = FALSE)
+```
+
+```{r}
+train_df %>% 
+  count(Survived) %>% 
+  mutate(pct = n / sum(n))
+```
+```{r}
+train_df %>% 
+  group_by(Sex) %>% 
+  summarise(Survived_ratio = mean(Survived),
+            n = n()) %>% 
+  mutate(pct = n / sum(n))
+```
+
+
+```{r}
+train_df %>% 
+  group_by(Pclass) %>% 
+  summarise(Survived_ratio = mean(Survived),
+            n = n()) %>% 
+  mutate(pct = n / sum(n))
+```
+
+```{r}
+ggplot(data = train_df,
+       aes(x = factor(Survived),
+           y = Age)) +
+  geom_boxplot() +
+  labs(title = "Age barplot",
+       x = element_blank()) +
+  scale_x_discrete(labels = c("0" = "Not Survived",
+                              "1" = "Survived"))
+```
+
+```{r}
+train_df <- mutate(train_df, Survived = factor(Survived))
+```
+
+## ML
+
+### Base model (Sex + Pclass)
+
+#### Recipe
+
+```{r}
+base.rec <-
+  recipe(formula = Survived ~ Sex + Pclass,
+                   data = train_df) %>% 
+  step_mutate(Pclass = factor(Pclass),
+              Sex = factor(Sex))
+```
+
+#### Models
+
+```{r}
+lr_spec <-
+  logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+```
+
+```{r}
+rf_spec <-
+  rand_forest() %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+```
+
+```{r}
+knn_spec <- 
+  nearest_neighbor() %>% 
+  set_mode("classification")
+```
+
+#### Cross Validation
+
+```{r}
+train_folds <- vfold_cv(
+  data = train_df,
+  v = 10,
+  repeats = 1,
+  strata = Survived
+)
+```
+
+#### Workflows
+
+```{r}
+base.wflows <- 
+  workflow_set(
+    preproc = list(base = base.rec),
+    models = list(lr = lr_spec,
+                  rf = rf_spec,
+                  knn = knn_spec),
+    cross = TRUE
+  )
+```
+
+#### Fit models
+
+```{r}
+base.fit <- 
+  base.wflows %>% 
+  workflow_map(
+    fn = "fit_resamples",
+    resamples = train_folds
+  )
+```
+
+#### Result plot
+
+```{r}
+base.fit %>% 
+  autoplot()
+```
+
